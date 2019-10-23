@@ -1,0 +1,131 @@
+# EVOKO_Diary_Actuallization
+
+# LEER ATENTAMENTE el siguiente bloque comentado - Funcionamiento del automatismo:
+#----------------------------------------------------------------------------------
+
+<#
+    * Este automatismo sólo actualizará automáticamente usuarios existentes en AD_On-Prem sincronizados con el tenant de Office365 
+      y con licencia asignada que incluya Outlook(Exchange Online) a final del día.
+    * La tarea programada en el Servidor Evoko que lanza el Script de comprobación de AD para creación del .csv diferencial,
+      se lanzará a las 10:00 PM
+    * La carga a Evoko_Home se realizará  desde dicho CSV, y se llevará acabo (sin poder modificar esta hora) a las 01:00 AM
+    * El Diferencial sólo añade al sistema Evoko usuarios nuevos en AD de las OU's determinadas.
+    * Si se elimina un usuario de una de esas OU's, y ya estaba sincronizado en Evoko, "NO" se eliminaráde Evoko Home automaticamente. Habrá que hacerlo manualmente
+      desde Evoko Home.
+    * Si queremos añadir un usuario al sistema Evoko Home que sólo existe en el Azure_AD de Office365, habrá
+      que realizarlo desde la consola de Evoko Home. 
+#>
+
+#############################
+# Creación CSV_Diferencial: #
+#############################
+
+
+# 1.Creación estructura CSV_Diferencial:
+#-----------------------------------------
+
+$CSV_diferencial = "C:\Program Files\EVOKO\EvokoHome\liso_files\scheduledusers.csv"
+$cabeceras2 = "username", "email","name","pin","rfid","type"
+$objetoPS2 = New-Object psobject
+foreach($cabecera2 in $cabeceras2)
+{
+    Add-Member -InputObject $objetoPS2 -MemberType noteproperty -Name $cabecera2 -Value ""
+}
+$objetoPS2 | Export-Csv $CSV_diferencial -NoTypeInformation
+
+
+# 2.Creación arrays de comparación Usuarios_AD antiguos y nuevos:
+#------------------------------------------------------------------
+$CSV_actualizado = "C:\Program Files\EVOKO\EvokoHome\liso_files\users_actualizado.csv"
+$array_old = Import-Csv $CSV_actualizado | select email
+
+# IMPORTANTE!!!!!!!!!!!
+# en caso de haber modificado el Script EVOKO_Full_Synchronization para usar el EmailAddress en vez de el UserPrincipalName, "des-comentar" las
+# "lineas 45,47 y 53" y "comentar las "lineas 44,46 y 52"
+
+$actualAD_users_to_compare = Get-ADUser -Filter * -SearchBase "OU=Almirall Spain,OU=Almirall,OU=Usuarios,DC=intranet,DC=ap" | select UserPrincipalName
+# $ad_users_to_export = Get-ADUser -Filter * -SearchBase "OU=Almirall Spain,OU=Almirall,OU=Usuarios,DC=intranet,DC=ap" -Properties EmailAddress | select EmailAddress
+$array_new = $actualAD_users_to_compare.UserPrincipalName
+# $array_new = $actualAD_users_to_compare.EmailAddress
+
+# 2.3.Incialización algunas variables a usar en bucle:
+#-----------------------------------------------------
+
+$actualAD_users_info = Get-ADUser -Filter * -SearchBase "OU=Almirall Spain,OU=Almirall,OU=Usuarios,DC=intranet,DC=ap" | select Name,UserPrincipalName
+# $actualAD_users_info = Get-ADUser -Filter * -SearchBase "OU=Almirall Spain,OU=Almirall,OU=Usuarios,DC=intranet,DC=ap" -Properties EmailAddress | select Name,EmailAddress
+$user_pin_d = ""
+$user_rfid_d = ""
+$user_type_d = "User"
+$count = 0
+
+
+# 2.4.Bucle Comparativo / Adición de Usuarios_AD nuevos en CSV_Diferencial, Adición al CSV_Actualizado. Sólo de una OU!!!!!:
+#----------------------------------------------------------------------------------------------------------------------------
+
+foreach($new_email in $array_new)
+{
+    if($array_old.email -notcontains $new_email){
+
+        $user_email_d = $user_username_d = $actualAD_users_info[$count].UserPrincipalName
+        # $user_email_d = $user_email_d -replace ".es",".almirall.com" #si es distinto, hay que poner el de Office365
+        $user_name_d = $actualAD_users_info[$count].Name
+        $hash_d = @{
+                    "username" = $user_username_d
+                    "email" = $user_email_d
+                    "name" = $user_name_d
+                    "pin" = $user_pin_d
+                    "rfid" = $user_rfid_d
+                    "type" = $user_type_d
+                 }
+        $nuevaFila_d = New-Object psobject -Property $hash_d
+        Export-Csv $CSV_diferencial -inputobject $nuevaFila_d -append -Force
+
+        # Actualización CSV_Actualizado:
+        #-------------------------------
+
+        $nuevaFila = New-Object psobject -Property $hash_d
+        Export-Csv $CSV_actualizado -inputobject $nuevaFila -append -Force
+    }
+
+    $count ++
+}
+
+# 2.5.OPCIONAL --> ACTUALIZACIÓN de más OU's!!!
+#----------------------------------------------
+
+# Repetir las siguientes líneas (con las posibles modificaciones descritas anteriormente), para cada OU adicional a sincronizar:
+
+$actualAD_users_to_compare = Get-ADUser -Filter * -SearchBase "OU=External Users,OU=Usuarios,DC=intranet,DC=ap" | select UserPrincipalName
+# $ad_users_to_export = Get-ADUser -Filter * -SearchBase "OU=External Users,OU=Usuarios,DC=intranet,DC=ap" -Properties EmailAddress | select EmailAddress
+$array_new = $actualAD_users_to_compare.UserPrincipalName
+# $array_new = $actualAD_users_to_compare.EmailAddress
+$actualAD_users_info = Get-ADUser -Filter * -SearchBase "OU=External Users,OU=Usuarios,DC=intranet,DC=ap" | select Name,UserPrincipalName
+# $actualAD_users_info = Get-ADUser -Filter * -SearchBase "OU=External Users,OU=Usuarios,DC=intranet,DC=ap" -Properties EmailAddress | select Name,EmailAddress
+$count = 0
+foreach($new_email in $array_new)
+{
+    if($array_old.email -notcontains $new_email){
+
+        $user_email_d = $user_username_d = $actualAD_users_info[$count].UserPrincipalName
+        # $user_email_d = $user_email_d -replace ".es",".almirall.com" #si es distinto, hay que poner el de Office365
+        $user_name_d = $actualAD_users_info[$count].Name
+        $hash_d = @{
+                    "username" = $user_username_d
+                    "email" = $user_email_d
+                    "name" = $user_name_d
+                    "pin" = $user_pin_d
+                    "rfid" = $user_rfid_d
+                    "type" = $user_type_d
+                 }
+        $nuevaFila_d = New-Object psobject -Property $hash_d
+        Export-Csv $CSV_diferencial -inputobject $nuevaFila_d -append -Force
+
+        # Actualización CSV_Actualizado:
+        #-------------------------------
+
+        $nuevaFila = New-Object psobject -Property $hash_d
+        Export-Csv $CSV_actualizado -inputobject $nuevaFila -append -Force
+    }
+
+    $count ++
+}
