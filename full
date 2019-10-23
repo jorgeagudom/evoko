@@ -1,0 +1,92 @@
+#EVOKO_Diary_Actuallization.ps1
+
+# LEER ATENTAMENTE el siguiente bloque comentado - Funcionamiento del automatismo:
+#----------------------------------------------------------------------------------
+
+<#
+    * Este automatismo sólo actualizará automáticamente usuarios existentes en AD_On-Prem sincronizados con el tenant de Office365 
+      y con licencia asignada que incluya Outlook(Exchange Online) a final del día.
+    * La tarea programada en el Servidor Evoko que lanza el Script de comprobación de AD para creación del .csv diferencial,
+      se lanzará a las 10:00 PM
+    * La carga a Evoko_Home se realizará  desde dicho CSV, y se llevará acabo (sin poder modificar esta hora) a las 01:00 AM
+    * El Diferencial sólo añade al sistema Evoko usuarios nuevos en AD de las OU's determinadas.
+    * Si se elimina un usuario de una de esas OU's, y ya estaba sincronizado en Evoko, "NO" se eliminaráde Evoko Home automaticamente. Habrá que hacerlo manualmente
+      desde Evoko Home.
+    * Si queremos añadir un usuario al sistema Evoko Home que sólo existe en el Azure_AD de Office365, habrá
+      que realizarlo desde la consola de Evoko Home. 
+#>
+
+##################################################################################
+# Creación CSV_Base/Actualizado para poder realizar el Diferencial a posteriori: #
+##################################################################################
+
+$CSV_actualizado = "C:\Program Files\EVOKO\EvokoHome\liso_files\users_actualizado.csv"
+$cabeceras = "username", "email","name","pin","rfid","type"
+$objetoPS = New-Object psobject
+foreach($cabecera in $cabeceras)
+{
+    Add-Member -InputObject $objetoPS -MemberType noteproperty -Name $cabecera -Value ""
+}
+$objetoPS | Export-Csv $CSV_actualizado -NoTypeInformation
+
+# LEER ATENTAMENTE el siguiente bloque comentado - APRECIACIONES para adaptación del Script según requerimientos (refiere a las líneas comentadas):
+#--------------------------------------------------------------------------------------------------------------------------------------------------
+<#
+    * el parámetro "-SearchBase" corresponde al Atributo "distinguishedName" de la OU en AD (es formato LDAP)
+    * Lo que se muestra en Evoko Home como "UserEmail" y "FullName" corresponden a "email" y "name" respectivamente en el ".csv"
+    * SÓLO En caso de que el "UserEmail" no corresponda con el de Office365, tendríamos que hacer una conversión.
+      Para ello símplemente "des-comentar" la "línea 52".
+    * En el caso de que como "email" se use el "E-mail" del contacto en AD on-prem, por ser distinto al UserPrincipalName, y ser el mismo que en Office365,
+      entonces habría que "des-comentar las "líneas 43 y 51" y "comentar" las "´líneas 42 y 50".
+    *** En el caso de añadir más bucles "foreach" para varias OU's, realizar los mismos cambios de forma análoga en las filas correspondientes
+#>
+
+$ad_users_to_export = Get-ADUser -Filter * -SearchBase "OU=Almirall Spain,OU=Almirall,OU=Usuarios,DC=intranet,DC=ap" | select Name,UserPrincipalName
+# $ad_users_to_export = Get-ADUser -Filter * -SearchBase "OU=Almirall Spain,OU=Almirall,OU=Usuarios,DC=intranet,DC=ap" -Properties EmailAddress | select Name,EmailAddress
+$user_pin = ""
+$user_rfid = ""
+$user_type = "User"
+
+foreach($userToRow in $ad_users_to_export)
+{
+    $user_email = $user_username = $userToRow.UserPrincipalName
+    # $user_email = $user_username = $userToRow.Emailaddress
+    # $user_email = $user_email -replace ".es",".almirall.com" #si es distinto, hay que poner el de Office365
+    $user_name = $userToRow.Name
+    $hash = @{
+                "username" = $user_username
+                "email" = $user_email
+                "name" = $user_name
+                "pin" = $user_pin
+                "rfid" = $user_rfid
+                "type" = $user_type
+             }
+    $nuevaFila = New-Object psobject -Property $hash
+    Export-Csv $CSV_actualizado -inputobject $nuevaFila -append -Force
+}
+
+# En caso de sincronizar Varias OU's, es necesario incluir por cada OU adicional, un bloque cómo el
+# siguiente bloque comentado, símplemente cambiando el "-SearchBase", además de los posibles cambios de líneas comentadas como se explicó más arriba
+# Descomenta el siguiente bloque y reprdúcelo tantas veces quieras:
+
+
+$ad_users_to_export = Get-ADUser -Filter * -SearchBase "OU=External Users,OU=Usuarios,DC=intranet,DC=ap" | select Name,UserPrincipalName
+# $ad_users_to_export = Get-ADUser -Filter * -SearchBase "OU=External Users,OU=Usuarios,DC=intranet,DC=ap" -Properties EmailAddress | select Name,EmailAddress
+
+foreach($userToRow in $ad_users_to_export)
+{
+    $user_email = $user_username = $userToRow.UserPrincipalName
+    # $user_email = $user_username = $userToRow.Emailaddress
+    # $user_email = $user_email -replace ".es",".almirall.com" #si es distinto, hay que poner el de Office365
+    $user_name = $userToRow.Name
+    $hash = @{
+                "username" = $user_username
+                "email" = $user_email
+                "name" = $user_name
+                "pin" = $user_pin
+                "rfid" = $user_rfid
+                "type" = $user_type
+             }
+    $nuevaFila = New-Object psobject -Property $hash
+    Export-Csv $CSV_actualizado -inputobject $nuevaFila -append -Force
+}
